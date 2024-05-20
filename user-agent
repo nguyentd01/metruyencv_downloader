@@ -1,0 +1,14 @@
+import random
+
+from bs4 import BeautifulSoup
+import httpx
+
+def get():
+    user_agents = []
+    url = "https://www.useragentlist.net/"
+    request = httpx.get(url)
+    soup = BeautifulSoup(request.text, "lxml")
+    user_agent = soup.select("pre.wp-block-code")
+    for i in user_agent:
+        user_agents.append(i.text)
+    return random.choice(user_agents)
