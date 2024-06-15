@@ -9,7 +9,10 @@ import backoff
 from user_agent import get
 from tqdm.asyncio import tqdm
 
+
 # Set up global httpx settings for better performance
+disk = "D"
+disk = input('Ổ đĩa lưu truyện(C/D):')
 max_connections = int(input('''Max Connections (10 -> 1000) 
 Note: Càng cao thì rủi ro lỗi cũng tăng, chỉ số tối ưu nhất là 50 : '''))
 limits = httpx.Limits(max_keepalive_connections=0, max_connections=max_connections)
@@ -30,22 +33,19 @@ header = {'user-agent': user_agent}
 
 
 def sort_chapters(list_of_chapters):
-    with tqdm(total=len(list_of_chapters), desc="Sắp xếp chapters", unit=" chapters") as pbar:
-        sorted_tuples = []
-        for i in range(len(list_of_chapters)):
-            # Insert the next tuple into the correct position in the sorted list
-            j = 0
-            while j < len(sorted_tuples) and list_of_chapters[i][0] > sorted_tuples[j][0]:
-                j += 1
-            sorted_tuples.insert(j, list_of_chapters[i])
-            pbar.update(1)  # Update progress bar by 1
+    lst = len(list_of_chapters)
+    for i in range(0, lst):
+        for j in range(0, lst - i - 1):
+            if (list_of_chapters[j][2] > list_of_chapters[j + 1][2]):
+                temp = list_of_chapters[j]
+                list_of_chapters[j] = list_of_chapters[j + 1]
+                list_of_chapters[j + 1] = temp
 
-    return sorted_tuples
+    return list_of_chapters
 
 
 # Retry decorator for handling transient errors, excluding 404 errors
 @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=3, giveup=lambda e: e.response.status_code == 404)
-@alru_cache(maxsize=1024)
 async def get_chapter_with_retry(chapter_number, novel_url):
     url = f'{novel_url}/chuong-{chapter_number}'
     try:
@@ -77,13 +77,9 @@ Lỗi: Không thể tìm thấy chapter {chapter_number} (404), đang bỏ qua..
             raise
 
 # Cache the results of the 'get' function for better performance
-@alru_cache(1024)
-async def get_chapter(chapter_number, novel_url):
-    await asyncio.sleep(1)
-    return await get_chapter_with_retry(chapter_number, novel_url)
-
+@alru_cache(maxsize=1024)
 async def fetch_chapters(start_chapter, end_chapter, novel_url):
-    tasks = [get_chapter(number, novel_url) for number in range(start_chapter, end_chapter + 1)]
+    tasks = [get_chapter_with_retry(number, novel_url) for number in range(start_chapter, end_chapter + 1)]
     # Use tqdm to display a progress bar
     chapters = []
     async for future in tqdm(asyncio.as_completed(tasks), total=end_chapter - start_chapter + 1, desc="Tải chapters...", unit=" chapters"):
@@ -104,15 +100,13 @@ async def create_epub(title, author, status, attribute, image, chapters, path, f
     book.set_cover(content=image, file_name='cover.jpg')
     book.add_metadata(None, 'meta', '', {'name': 'attribute', 'content': attribute})
 
-    # Add chapters with a progress bar
-    for i, chapter in enumerate(tqdm(chapters, total=len(chapters), desc="Tạo ePUB...", unit=" chapters"), 1):
-        chapter_title, html, chapter_num = chapter  # Unpack the chapter result
+    for chapter_title , chapter , i in chapters:
         chapter_title = BeautifulSoup(chapter_title, 'lxml').text
-        html = f'<h2>{chapter_title}</h2>' + html
+        chapter = f'<h2>{chapter_title}</h2>' + chapter
         if i == 1:
-            html = f'<h1>{title}</h1>' + html
+            chapter = f'<h1>{title}</h1>' + chapter
 
-        html = BeautifulSoup(html, 'lxml')
+        html = BeautifulSoup(chapter, 'lxml')
         file_name = f'chapter{i}.html'
         chapter = epub.EpubHtml(lang='vn', title=chapter_title, file_name=file_name, uid=f'chapter{i}')
         chapter.content = str(html)
@@ -167,7 +161,7 @@ async def main():
             continue
 
         filename = novel_url.replace(BASE_URL, '').replace('-', '')
-        path = f"D:/novel/{title.replace(':', ',')}"
+        path = f"{disk.capitalize()}:/novel/{title.replace(':', ',').replace('?','')}"
         os.makedirs(path, exist_ok=True)
 
         chapters = await fetch_chapters(start_chapter, end_chapter, novel_url)
