@@ -9,15 +9,16 @@ import backoff
 from user_agent import get
 from tqdm.asyncio import tqdm
 
+
 # Set up global httpx settings for better performance
-disk = input('Ổ đĩa lưu truyện(C/D):')
+disk = str(input('Ổ đĩa lưu truyện(C/D):')).capitalize()
 max_connections = int(input('''Max Connections (10 -> 1000) 
 Note: Càng cao thì rủi ro lỗi cũng tăng, chỉ số tối ưu nhất là 50 : '''))
 limits = httpx.Limits(max_keepalive_connections=0, max_connections=max_connections)
 timeout = httpx.Timeout(None)
 client = httpx.AsyncClient(limits=limits, timeout=timeout)
 
-# Enable garbage collection
+ # Enable garbage collection
 gc.enable()
 
 # Base URL for the novel
@@ -58,16 +59,14 @@ async def get_chapter_with_retry(chapter_number, novel_url):
             else:
                 i += 1
                 if i == 10:
-                    break
+                    return None
 
         if html is None or chapter_title is None:
             print(f"""
 Lỗi: Không thể tìm thấy chapter {chapter_number}, đang bỏ qua...""")
             return None
 
-        if 'Vui lòng đăng nhập để đọc tiếp nội dung' in html:
-            print(f"Lỗi: Cần đăng nhập để tải chapter {chapter_number}, đang bỏ qua...")
-            return None
+        await asyncio.sleep(1)
         return str(chapter_title), html, chapter_number
     except httpx.HTTPError as e:
         if e.response.status_code == 404:
@@ -79,18 +78,21 @@ Lỗi: Không thể tìm thấy chapter {chapter_number} (404), đang bỏ qua..
             await asyncio.sleep(5)
             raise
 
+
 # Cache the results of the 'get' function for better performance
 @alru_cache(maxsize=1024)
 async def fetch_chapters(start_chapter, end_chapter, novel_url):
     tasks = [get_chapter_with_retry(number, novel_url) for number in range(start_chapter, end_chapter + 1)]
     # Use tqdm to display a progress bar
     chapters = []
-    async for future in tqdm(asyncio.as_completed(tasks), total=end_chapter - start_chapter + 1, desc="Tải chapters...", unit=" chapters"):
+    async for future in tqdm(asyncio.as_completed(tasks), total=end_chapter - start_chapter + 1, desc="Tải chapters...",
+                             unit=" chapters"):
         chapter = await future  # Await here to get the actual result
         if chapter is not None:
             chapters.append(chapter)
     sorted_chapters = sort_chapters(chapters)
     return sorted_chapters
+
 
 def create_epub(title, author, status, attribute, image, chapters, path, filename):
     book = epub.EpubBook()
@@ -104,7 +106,7 @@ def create_epub(title, author, status, attribute, image, chapters, path, filenam
     book.add_metadata(None, 'meta', '', {'name': 'attribute', 'content': attribute})
     num = 1
     chapter_num = []
-    for chapter_title , chapter , i in chapters:
+    for chapter_title, chapter, i in chapters:
         chapter_num.append(i)
         chapter_title = BeautifulSoup(chapter_title, 'lxml').text
         chapter = f'<h2>{chapter_title}</h2>' + chapter
@@ -138,6 +140,7 @@ def create_epub(title, author, status, attribute, image, chapters, path, filenam
     book.spine = [f'chapter{i}' for i in chapter_num]
     epub.write_epub(f'{path}/{filename}.epub', book)
 
+
 async def main():
     while True:
         novel_url = input('Nhập link metruyencv mà bạn muốn tải: ')
@@ -152,8 +155,11 @@ async def main():
             soup = BeautifulSoup(response.content, 'lxml')
             title = str(soup.find('h1', class_='mb-2').text)
             author = str(soup.find('a', class_='text-gray-500').text).strip()
-            status = str(soup.find('a', class_='inline-flex border border-primary rounded px-2 py-1 text-primary').select_one('span').text).strip()
-            attribute = str(soup.find('a', class_='inline-flex border border-rose-700 dark:border-red-400 rounded px-2 py-1 text-rose-700 dark:text-red-400').text)
+            status = str(
+                soup.find('a', class_='inline-flex border border-primary rounded px-2 py-1 text-primary').select_one(
+                    'span').text).strip()
+            attribute = str(soup.find('a',
+                                      class_='inline-flex border border-rose-700 dark:border-red-400 rounded px-2 py-1 text-rose-700 dark:text-red-400').text)
             image_url = soup.find('img', class_='w-44 h-60 shadow-lg rounded mx-auto')['src']
         except (httpx.HTTPError, TypeError, KeyError) as e:
             print(f"Error fetching novel information: {e}")
@@ -168,7 +174,7 @@ async def main():
             continue
 
         filename = novel_url.replace(BASE_URL, '').replace('-', '')
-        path = f"{disk.capitalize()}:/novel/{title.replace(':', ',').replace('?','')}"
+        path = f"{disk}:/novel/{title.replace(':', ',').replace('?', '')}"
         os.makedirs(path, exist_ok=True)
 
         chapters = await fetch_chapters(start_chapter, end_chapter, novel_url)
@@ -176,12 +182,14 @@ async def main():
 
         if valid_chapters:
             create_epub(title, author, status, attribute, image, valid_chapters, path, filename)
-            print(f'Tải thành công {len(valid_chapters)}/{end_chapter-start_chapter+1} chapter. File của bạn nằm tại "D:/novel"')
+            print(
+                f'Tải thành công {len(valid_chapters)}/{end_chapter - start_chapter + 1} chapter. File của bạn nằm tại "D:/novel"')
         else:
             print("Lỗi. Tải không thành công")
 
         if input("Tải tiếp? (y/n): ").lower() != 'y':
             break
+
 
 if __name__ == '__main__':
     asyncio.run(main())
