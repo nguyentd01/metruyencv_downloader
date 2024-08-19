@@ -2,31 +2,140 @@ import httpx
 from bs4 import BeautifulSoup
 from ebooklib import epub
 import asyncio
-import os
-import gc
-from async_lru import alru_cache
-import backoff
 from user_agent import get
 from tqdm.asyncio import tqdm
+import random
+import backoff
+from playwright.async_api import async_playwright
+import pytesseract
+from PIL import Image
+import io
+from appdirs import *
+import configparser
+import os.path
+import gc
+from async_lru import alru_cache
 
 
-# Set up global httpx settings for better performance
-disk = str(input('Ổ đĩa lưu truyện(C/D):')).capitalize()
-max_connections = int(input('''Max Connections (10 -> 1000) 
-Note: Càng cao thì rủi ro lỗi cũng tăng, chỉ số tối ưu nhất là 50 : '''))
-limits = httpx.Limits(max_keepalive_connections=0, max_connections=max_connections)
+
+# Enable garbage collection
+gc.enable()
+
+data_dir = user_config_dir(appname='metruyencv-downloader',appauthor='nguyentd010')
+os.makedirs(data_dir, exist_ok=True)
+if not os.path.isfile(data_dir + '\config.ini'):
+    config = configparser.ConfigParser()
+    with open(data_dir + '\config.ini', 'w') as configfile:
+        config.write(configfile)
+
+missing_chapter = []
+if os.stat(data_dir+"\config.ini").st_size == 0:
+    username = str(input('Email tài khoản metruyencv?:'))
+    password = str(input('Password?:'))
+    disk = str(input('Ổ đĩa lưu truyện(C/D):')).capitalize()
+    max_connections = int(input('''Max Connections (10 -> 1000) 
+    Note: Càng cao thì rủi ro lỗi cũng tăng, chỉ số tối ưu nhất là 50 : '''))
+    save = str(input('Lưu config?(Y/N):')).capitalize()
+
+else:
+    config = configparser.ConfigParser()
+    config.read(data_dir + '\config.ini')
+    username = str(config.get('data', 'login'))
+    password = str(config.get('data', 'password'))
+    disk = str(config.get('data', 'disk'))
+    max_connections = int(config.get('data', 'max-connection'))
+    save = None
+
+
+limits = httpx.Limits(max_keepalive_connections=100, max_connections=max_connections)
 timeout = httpx.Timeout(None)
 client = httpx.AsyncClient(limits=limits, timeout=timeout)
-
- # Enable garbage collection
-gc.enable()
 
 # Base URL for the novel
 BASE_URL = 'https://metruyencv.com/truyen/'
 
 user_agent = get()
 
+file_location = os.getcwd()
+
+pytesseract.pytesseract.tesseract_cmd = fr'{file_location}\Tesseract-OCR\tesseract.exe'
+
 header = {'user-agent': user_agent}
+
+if save == 'Y':
+    config = configparser.ConfigParser()
+    config['data'] = {'login': username, 'password': password, 'disk' : disk, 'max-connection' : max_connections}
+
+    # Write the configuration to a file
+    with open(data_dir + '\config.ini', 'w') as configfile:
+        config.write(configfile)
+
+def orc(image: bytes) -> str:
+    image = Image.open(io.BytesIO(image))
+    image = image.convert('L')
+    text = pytesseract.image_to_string(image, lang='vie')
+    return text
+
+def delete_dupe(list):
+    list1 = list.copy()
+    l = []
+    num = 0
+    for i, j, k in list1:
+        if k in l:
+            del list1[num]
+        l.append(i)
+        num += 1
+    return list1
+
+async def handle_route(route):
+  if "https://googleads" in route.request.url:
+    await route.abort()
+  else:
+    await route.continue_()
+
+
+async def download_missing_chapter(links):
+    ocr_results = []
+    results = []
+    async with async_playwright() as p:
+        browser = await p.firefox.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto('https://metruyencv.com/')
+        await page.locator('xpath=/html/body/div[1]/header/div/div/div[3]/button').click()
+        await asyncio.sleep(random.randint(1, 3))
+        await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[2]/div[1]/div/div[1]/button').click()
+        await asyncio.sleep(random.randint(1, 3))
+        await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[2]/input').fill(username)
+        await asyncio.sleep(random.randint(1, 3))
+        await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div[2]/input').fill(password)
+        await asyncio.sleep(random.randint(1, 3))
+        await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[3]/div[1]/button').click()
+        await asyncio.sleep(random.randint(1, 3))
+        await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[1]/div/div[2]/button').click()
+        await asyncio.sleep(random.randint(1, 3))
+        for title,link,num in links:
+            await asyncio.sleep(0.5)
+            await page.goto(link)
+            await page.route("**/*", handle_route)
+            loadmore_element1 = await page.wait_for_selector('#chapter-detail > div:nth-child(1)', state='attached')
+            missing_html1 = await loadmore_element1.inner_html()
+            missing_html1 = str(missing_html1)
+            if missing_html1.count('<br><br>') <= 4:
+                loadmore_element2 = await page.wait_for_selector('#load-more',state='attached')
+                missing_html2 = await loadmore_element2.inner_html()
+                missing_html2 = BeautifulSoup(str(missing_html2),'lxml')
+                images = await page.query_selector_all('canvas')
+                for image in images:
+                    image_bytes = await image.screenshot()
+                    ocr_result = orc(image_bytes)
+                    ocr_results.append(ocr_result)
+                for i, canvas in enumerate(missing_html2.find_all('canvas')):
+                    canvas.replace_with(ocr_results[i])
+                missing_html1 = missing_html1 + '<br/><br/>' + str(missing_html2)
+                missing_html1 = missing_html1.replace('<br/><br/>', '<br/>').replace('<br/>', '<br/><br/>').replace('\n', '')
+            results.append((title,missing_html1,num))
+        await browser.close()
+    return results
 
 
 def sort_chapters(list_of_chapters):
@@ -41,6 +150,7 @@ def sort_chapters(list_of_chapters):
 
 
 # Retry decorator for handling transient errors, excluding 404 errors
+
 @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=3, giveup=lambda e: e.response.status_code == 404)
 async def get_chapter_with_retry(chapter_number, novel_url):
     url = f'{novel_url}/chuong-{chapter_number}'
@@ -51,14 +161,14 @@ async def get_chapter_with_retry(chapter_number, novel_url):
             resp.raise_for_status()
             soup = BeautifulSoup(resp.content, 'lxml')
             chapter_content = soup.find('div', class_='break-words')
-            chapter_title = soup.find('h2', class_='text-center text-gray-600 dark:text-gray-400 text-balance')
+            chapter_title = str(soup.find('h2', class_='text-center text-gray-600 dark:text-gray-400 text-balance'))
             html = str(chapter_content)
-            await asyncio.sleep(1)
             if html.count("<br/>") != 8:
                 break
             else:
                 i += 1
                 if i == 10:
+                    missing_chapter.append((chapter_title,url,chapter_number))
                     return None
 
         if html is None or chapter_title is None:
@@ -66,8 +176,7 @@ async def get_chapter_with_retry(chapter_number, novel_url):
 Lỗi: Không thể tìm thấy chapter {chapter_number}, đang bỏ qua...""")
             return None
 
-        await asyncio.sleep(1)
-        return str(chapter_title), html, chapter_number
+        return chapter_title, html, chapter_number
     except httpx.HTTPError as e:
         if e.response.status_code == 404:
             print(f"""
@@ -78,18 +187,21 @@ Lỗi: Không thể tìm thấy chapter {chapter_number} (404), đang bỏ qua..
             await asyncio.sleep(5)
             raise
 
-
 # Cache the results of the 'get' function for better performance
 @alru_cache(maxsize=1024)
 async def fetch_chapters(start_chapter, end_chapter, novel_url):
-    tasks = [get_chapter_with_retry(number, novel_url) for number in range(start_chapter, end_chapter + 1)]
-    # Use tqdm to display a progress bar
+    tasks1 = [get_chapter_with_retry(number, novel_url) for number in range(start_chapter, end_chapter + 1)]
     chapters = []
-    async for future in tqdm(asyncio.as_completed(tasks), total=end_chapter - start_chapter + 1, desc="Tải chapters...",
+    # Use tqdm to display a progress bar
+    async for future1 in tqdm(asyncio.as_completed(tasks1), total=end_chapter - start_chapter + 1, desc="Tải chapters...",
                              unit=" chapters"):
-        chapter = await future  # Await here to get the actual result
+        chapter = await future1  # Await here to get the actual result
         if chapter is not None:
             chapters.append(chapter)
+    print('Đang tải chapters bị thiếu...')
+    if missing_chapter != []:
+        chapters += await download_missing_chapter(missing_chapter)
+    chapters = delete_dupe(chapters)
     sorted_chapters = sort_chapters(chapters)
     return sorted_chapters
 
@@ -104,15 +216,15 @@ def create_epub(title, author, status, attribute, image, chapters, path, filenam
     book.add_metadata(None, 'meta', '', {'name': 'chapter', 'content': str(len(chapters))})
     book.set_cover(content=image, file_name='cover.jpg')
     book.add_metadata(None, 'meta', '', {'name': 'attribute', 'content': attribute})
-    num = 1
+    p = 1
     chapter_num = []
     for chapter_title, chapter, i in chapters:
         chapter_num.append(i)
         chapter_title = BeautifulSoup(chapter_title, 'lxml').text
-        chapter = f'<h2>{chapter_title}</h2>' + chapter
-        if num == 1:
-            chapter = f'<h1>{title}</h1>' + chapter
-        num += 1
+        chapter = f'<h2>{chapter_title}</h2>' + "<h3>Generated by nguyentd010's metruyencv_downloader</h3>" + chapter
+        if p == 1:
+            chapter = f"<h1>{title}</h1>" + chapter
+        p += 1
         html = BeautifulSoup(chapter, 'lxml')
         file_name = f'chapter{i}.html'
         chapter = epub.EpubHtml(lang='vn', title=chapter_title, file_name=file_name, uid=f'chapter{i}')
