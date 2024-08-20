@@ -130,7 +130,7 @@ async def download_missing_chapter(links):
                     ocr_result = orc(image_bytes)
                     ocr_results.append(ocr_result)
                 for i, canvas in enumerate(missing_html2.find_all('canvas')):
-                    canvas.replace_with(ocr_results[i])
+                    missing_html2.find('canvas').replace_with(ocr_results[i])
                 missing_html1 = missing_html1 + '<br/><br/>' + str(missing_html2)
                 missing_html1 = missing_html1.replace('<br/><br/>', '<br/>').replace('<br/>', '<br/><br/>').replace('\n', '')
             results.append((title,missing_html1,num))
