@@ -58,6 +58,7 @@ user_agent = get()
 
 file_location = os.getcwd()
 
+
 pytesseract.pytesseract.tesseract_cmd = fr'{file_location}\Tesseract-OCR\tesseract.exe'
 
 header = {'user-agent': user_agent}
@@ -73,7 +74,7 @@ if save == 'Y':
 def orc(image: bytes) -> str:
     image = Image.open(io.BytesIO(image))
     image = image.convert('L')
-    text = pytesseract.image_to_string(image, lang='vie')
+    text = pytesseract.image_to_string(image, lang='vie',config='--psm 6 --oem 2')
     return text
 
 def delete_dupe(list):
@@ -88,15 +89,15 @@ def delete_dupe(list):
     return list1
 
 async def handle_route(route):
-  if "https://googleads" in route.request.url:
+  if "https://googleads" in route.request.url or "https://adclick" in route.request.url:
     await route.abort()
   else:
     await route.continue_()
 
 
 async def download_missing_chapter(links):
-    ocr_results = []
     results = []
+    setting = True
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=True)
         page = await browser.new_page()
@@ -114,26 +115,33 @@ async def download_missing_chapter(links):
         await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[1]/div/div[2]/button').click()
         await asyncio.sleep(random.randint(1, 3))
         for title,link,num in links:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             await page.goto(link)
             await page.route("**/*", handle_route)
-            loadmore_element1 = await page.wait_for_selector('#chapter-detail > div:nth-child(1)', state='attached')
+            if setting:
+                await page.locator('xpath=/html/body/div[1]/main/div[3]/div[1]/button[1]').click()
+                await page.locator('xpath=/html/body/div[1]/main/div[3]/div[2]/div/div[2]/div/div/div[2]/div[3]/select').select_option(value ='Times New Roman')
+                await page.locator('xpath=/html/body/div[1]/main/div[3]/div[2]/div/div[2]/div/div/div[2]/div[4]/select').select_option(value='30px')
+                await page.reload()
+                setting = False
+            loadmore_element1 = await page.wait_for_selector('xpath=/html/body/div[1]/main/div[4]/div[1]', state='attached')
             missing_html1 = await loadmore_element1.inner_html()
             missing_html1 = str(missing_html1)
             if missing_html1.count('<br><br>') <= 4:
-                loadmore_element2 = await page.wait_for_selector('#load-more',state='attached')
+                loadmore_element2 = await page.wait_for_selector('xpath=/html/body/div[1]/main/div[4]/div[3]',state='attached')
+                await asyncio.sleep(1)
                 missing_html2 = await loadmore_element2.inner_html()
                 missing_html2 = BeautifulSoup(str(missing_html2),'lxml')
-                images = await page.query_selector_all('canvas')
-                for image in images:
-                    image_bytes = await image.screenshot()
-                    ocr_result = orc(image_bytes)
-                    ocr_results.append(ocr_result)
-                for i, canvas in enumerate(missing_html2.find_all('canvas')):
-                    missing_html2.find('canvas').replace_with(ocr_results[i])
+                if missing_html2.find('canvas') != None:
+                    images = await page.query_selector_all('canvas')
+                    for image in images:
+                        image_bytes = await image.screenshot()
+                        ocr_result = orc(image_bytes)
+                        missing_html2.find('canvas').replace_with(ocr_result)
                 missing_html1 = missing_html1 + '<br/><br/>' + str(missing_html2)
-                missing_html1 = missing_html1.replace('<br/><br/>', '<br/>').replace('<br/>', '<br/><br/>').replace('\n', '')
-            results.append((title,missing_html1,num))
+                missing_html1 = missing_html1.replace('<br/><br/>', '<br/>').replace('<br/>', '<br/><br/>').replace('\n', ' ')
+                results.append((title,missing_html1,num))
+            print(f'Đã tải xong chap {num}')
         await browser.close()
     return results
 
@@ -226,7 +234,7 @@ def create_epub(title, author, status, attribute, image, chapters, path, filenam
             chapter = f"<h1>{title}</h1>" + chapter
         p += 1
         html = BeautifulSoup(chapter, 'lxml')
-        file_name = f'chapter{i}.html'
+        file_name = f'chapter{i}-{chapter_title}.html'
         chapter = epub.EpubHtml(lang='vn', title=chapter_title, file_name=file_name, uid=f'chapter{i}')
         chapter.content = str(html)
         book.add_item(chapter)
