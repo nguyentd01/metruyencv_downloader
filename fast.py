@@ -50,7 +50,7 @@ timeout = httpx.Timeout(None)
 client = httpx.AsyncClient(limits=limits, timeout=timeout)
 
 # Base URL for the novel
-BASE_URL = 'https://metruyencv.com/truyen/'
+BASE_URL = 'https://metruyencv.info/truyen/'
 
 user_agent = get()
 
@@ -108,7 +108,7 @@ async def handle_route(route):
 
 async def download_missing_chapter(links):
     results = []
-    link = links[1][1]
+    link = links[0][1]
     asyncio_semaphore = asyncio.Semaphore(10)
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=True)
