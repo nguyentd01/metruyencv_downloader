@@ -4,7 +4,6 @@ from ebooklib import epub
 import asyncio
 from user_agent import get
 from tqdm.asyncio import tqdm
-import random
 import backoff
 from playwright.async_api import async_playwright
 import pytesseract
@@ -52,7 +51,7 @@ timeout = httpx.Timeout(None)
 client = httpx.AsyncClient(limits=limits, timeout=timeout)
 
 # Base URL for the novel
-BASE_URL = 'https://metruyencv.com/truyen/'
+BASE_URL = 'https://metruyencv.info/truyen/'
 
 user_agent = get()
 
@@ -71,10 +70,10 @@ if save == 'Y':
     with open(data_dir + '\config.ini', 'w') as configfile:
         config.write(configfile)
 
-def orc(image: bytes) -> str:
+def ocr(image: bytes) -> str:
     image = Image.open(io.BytesIO(image))
     image = image.convert('L')
-    text = pytesseract.image_to_string(image, lang='vie',config='--psm 6 --oem 2')
+    text = pytesseract.image_to_string(image, lang='vie')
     return text
 
 def delete_dupe(list):
@@ -101,27 +100,26 @@ async def download_missing_chapter(links):
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=True)
         page = await browser.new_page()
-        await page.goto('https://metruyencv.com/')
+        await page.goto('https://metruyencv.info/')
         await page.locator('xpath=/html/body/div[1]/header/div/div/div[3]/button').click()
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[2]/div[1]/div/div[1]/button').click()
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[2]/input').fill(username)
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div[2]/input').fill(password)
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[3]/div[2]/div/div/div[2]/div[3]/div[1]/button').click()
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[1]/div/div[2]/button').click()
-        await asyncio.sleep(random.randint(1, 3))
+        await asyncio.sleep(1)
         for title,link,num in links:
-            await asyncio.sleep(1)
             await page.goto(link)
             await page.route("**/*", handle_route)
             if setting:
                 await page.locator('xpath=/html/body/div[1]/main/div[3]/div[1]/button[1]').click()
                 await page.locator('xpath=/html/body/div[1]/main/div[3]/div[2]/div/div[2]/div/div/div[2]/div[3]/select').select_option(value ='Times New Roman')
-                await page.locator('xpath=/html/body/div[1]/main/div[3]/div[2]/div/div[2]/div/div/div[2]/div[4]/select').select_option(value='30px')
+                await page.locator('xpath=/html/body/div[1]/main/div[3]/div[2]/div/div[2]/div/div/div[2]/div[4]/select').select_option(value='50px')
                 await page.reload()
                 setting = False
             loadmore_element1 = await page.wait_for_selector('xpath=/html/body/div[1]/main/div[4]/div[1]', state='attached')
@@ -129,14 +127,13 @@ async def download_missing_chapter(links):
             missing_html1 = str(missing_html1)
             if missing_html1.count('<br><br>') <= 4:
                 loadmore_element2 = await page.wait_for_selector('xpath=/html/body/div[1]/main/div[4]/div[3]',state='attached')
-                await asyncio.sleep(1)
                 missing_html2 = await loadmore_element2.inner_html()
                 missing_html2 = BeautifulSoup(str(missing_html2),'lxml')
                 if missing_html2.find('canvas') != None:
                     images = await page.query_selector_all('canvas')
                     for image in images:
                         image_bytes = await image.screenshot()
-                        ocr_result = orc(image_bytes)
+                        ocr_result = ocr(image_bytes)
                         missing_html2.find('canvas').replace_with(ocr_result)
                 missing_html1 = missing_html1 + '<br/><br/>' + str(missing_html2)
                 missing_html1 = missing_html1.replace('<br/><br/>', '<br/>').replace('<br/>', '<br/><br/>').replace('\n', ' ')
