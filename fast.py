@@ -91,7 +91,7 @@ def delete_dupe(list):
 async def download_chapter(semaphore,context,title,link,num):
     async with semaphore:
         page = await context.new_page()
-        await page.goto(link,timeout=6000000)
+        await page.goto(link,timeout=0)
         await page.route("**/*", handle_route)
         await page.wait_for_selector('xpath=/html/body/div[1]/main/div[4]/div[1]', state='attached',timeout=600000)
         image = await page.locator('xpath=/html/body/div[1]/main/div[4]').screenshot()
