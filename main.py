@@ -100,7 +100,7 @@ async def download_missing_chapter(links):
     async with async_playwright() as p:
         browser = await p.firefox.launch(headless=True)
         page = await browser.new_page()
-        await page.goto('https://metruyencv.info/')
+        await page.goto('https://metruyencv.info/',timeout=0)
         await page.locator('xpath=/html/body/div[1]/header/div/div/div[3]/button').click()
         await asyncio.sleep(1)
         await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[2]/div[1]/div/div[1]/button').click()
@@ -114,7 +114,7 @@ async def download_missing_chapter(links):
         await page.locator('xpath=/html/body/div[1]/div[2]/div/div[2]/div/div/div/div/div[1]/div/div[2]/button').click()
         await asyncio.sleep(1)
         for title,link,num in links:
-            await page.goto(link)
+            await page.goto(link,timeout=0)
             await page.route("**/*", handle_route)
             if setting:
                 await page.locator('xpath=/html/body/div[1]/main/div[3]/div[1]/button[1]').click()
